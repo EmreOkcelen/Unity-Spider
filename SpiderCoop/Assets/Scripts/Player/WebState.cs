@@ -1,4 +1,4 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 
 public class WebState : State
 {
@@ -29,32 +29,34 @@ public class WebState : State
 
     public override void LogicUpdate()
     {
-        // ip iptal (sol tık tekrar)
+        // ip iptal (sol tÄ±k tekrar)
         if (Input.GetMouseButtonDown(0) && isPulling)
         {
-            StopClimbIfActive(); // tırmanmayı bırak
+            StopClimbIfActive();
             webShooter.StopPulling();
             isPulling = false;
             stateMachine.ChangeState(player.isGrounded ? player.groundedState : player.airState);
             return;
         }
 
-        // space basılı tutuluyorsa webe tırman
+        // space basÄ±lÄ± tutuluyorsa webe tÄ±rman
         if (isPulling && player.inputJumpHeld)
         {
-            if (!isClimbing) // ilk kez basıldı
+            if (!isClimbing) // ilk kez basÄ±ldÄ±
             {
                 isClimbing = true;
-                player.rb.isKinematic = true; // physics devre dışı
+                player.rb.isKinematic = true; // physics devre dÄ±ÅŸÄ±
             }
             webShooter.Climb(player.rb, climbSpeed);
         }
-        else if (isClimbing) // Space bırakıldıysa
+        else if (isClimbing) // Space bÄ±rakÄ±ldÄ±ysa
         {
-            StopClimbIfActive();
+            // ArtÄ±k fizik aÃ§mÄ±yoruz, player aÄŸda sabit kalacak
+            isClimbing = false;
+            // rb.isKinematic true kalÄ±yor â†’ dÃ¼ÅŸmeyecek
         }
 
-        // isPulling ve actual joint uyumlu değilse çık
+        // isPulling ve actual joint uyumlu deÄŸilse Ã§Ä±k
         if (!isPulling || (webShooter != null && !webShooter.IsAttached()))
         {
             StopClimbIfActive();
@@ -75,10 +77,15 @@ public class WebState : State
 
     private void StopClimbIfActive()
     {
-        if (isClimbing)
+        if (!isClimbing)
         {
             isClimbing = false;
-            player.rb.isKinematic = false; // physics tekrar aktif
+
+            // Fizik tekrar aÃ§
+            player.rb.isKinematic = false;
+
+            // GerÃ§ekÃ§i momentum: tÄ±rmanma hÄ±zÄ±nÄ± kuvvet olarak uygula
+            player.rb.AddForce(Vector3.down * climbSpeed * 0.001f, ForceMode.VelocityChange);
         }
     }
 }
