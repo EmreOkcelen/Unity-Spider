@@ -12,3 +12,5 @@ MemoryCaptures/
 *.sln
 *.user
 *.vsconfig
+# Visual Studio
+.vs/
