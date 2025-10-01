@@ -1,8 +1,9 @@
 using System.Collections;
+using Unity.Netcode;
 using UnityEngine;
 
 [RequireComponent(typeof(LineRenderer))]
-public class SimpleWebShooter : MonoBehaviour
+public class SimpleWebShooter : NetworkBehaviour
 {
     [Header("Web Settings")]
     public float maxDistance = 20f;
@@ -18,26 +19,40 @@ public class SimpleWebShooter : MonoBehaviour
     private Vector3 attachPoint;
     private Coroutine lineCoroutine;
 
+    private PlayerController pc;
+
     private void Awake()
     {
         if (line == null) line = GetComponent<LineRenderer>();
         if (line != null) line.positionCount = 0;
+        pc = GetComponent<PlayerController>();
     }
 
-    // Called from WebState.Enter()
+    // Called from WebState.Enter() (owner tarafýndan çaðrýlmalý)
     public Vector3? TryShoot()
     {
+        if (!IsOwner) return null; // sadece owner input okur
+
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, grappleLayer))
         {
             attachPoint = hit.point;
+            // network deðiþkenlerini güncelle
+            if (pc != null && pc.IsOwner)
+            {
+                pc.netAttachPoint.Value = attachPoint;
+                pc.netIsAttached.Value = true;
+            }
             return attachPoint;
         }
+
         return null;
     }
 
     public void StartPulling(Rigidbody playerRb)
     {
+        if (!IsOwner) return; // sadece owner fiziksel joint yapar
+
         if (currentJoint != null) StopPulling();
 
         currentJoint = playerRb.gameObject.AddComponent<SpringJoint>();
@@ -47,7 +62,6 @@ public class SimpleWebShooter : MonoBehaviour
         float distance = Vector3.Distance(playerRb.position, attachPoint);
         currentJoint.maxDistance = distance * 0.8f;
         currentJoint.minDistance = 0f;
-
         currentJoint.spring = spring;
         currentJoint.damper = damper;
         currentJoint.massScale = massScale;
@@ -64,6 +78,8 @@ public class SimpleWebShooter : MonoBehaviour
 
     public void StopPulling()
     {
+        if (!IsOwner) return;
+
         if (currentJoint != null)
         {
             Destroy(currentJoint);
@@ -80,23 +96,22 @@ public class SimpleWebShooter : MonoBehaviour
             StopCoroutine(lineCoroutine);
             lineCoroutine = null;
         }
+
+        if (pc != null && pc.IsOwner)
+        {
+            pc.netIsAttached.Value = false;
+        }
     }
 
-    // Yeni: web'e týrmanma. maxDistance'ý azaltarak oyuncuyu attach noktasýna yaklaþtýrýr.
     public void Climb(Rigidbody playerRb, float climbSpeed)
     {
+        if (!IsOwner) return;
         if (currentJoint == null) return;
 
-        // Attach noktasýna doðru yön
         Vector3 dir = (attachPoint - playerRb.position).normalized;
-
-        // Yukarý çýkma hareketi (sabit noktaya doðru)
         playerRb.MovePosition(playerRb.position + dir * climbSpeed * Time.deltaTime);
-
-        // LineRenderer güncellemesi
         UpdateLine(playerRb);
     }
-
 
     // Yeni: baðlý mý diye dýþarýya bilgi ver.
     public bool IsAttached()

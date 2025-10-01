@@ -68,24 +68,43 @@ public class WebState : State
     public override void Exit()
     {
         StopClimbIfActive();
+
         if (isPulling)
         {
             webShooter.StopPulling();
             isPulling = false;
         }
+
+        // kesin temizlik: eğer herhangi bir durumda rb kinematik kaldıysa aç
+        if (player.rb != null && player.rb.isKinematic)
+        {
+            player.rb.isKinematic = false;
+        }
     }
+
 
     private void StopClimbIfActive()
     {
+        // Eğer tırmanmıyorsak bir şey yapma
         if (!isClimbing)
+            return;
+
+        // Tırmanma aktifse, iptal et
+        isClimbing = false;
+
+        // Fizik tekrar aç
+        player.rb.isKinematic = false;
+
+        // Gerçekçi momentum: kinematikten fiziksel hale dönerken küçük bir ivme uygula
+        // (Çok küçük bir aşağı vuruş, oyuncunun sabit kalmasını engeller)
+        try
         {
-            isClimbing = false;
-
-            // Fizik tekrar aç
-            player.rb.isKinematic = false;
-
-            // Gerçekçi momentum: tırmanma hızını kuvvet olarak uygula
-            player.rb.AddForce(Vector3.down * climbSpeed * 0.001f, ForceMode.VelocityChange);
+            player.rb.AddForce(Vector3.down * (climbSpeed * 0.1f + 1f), ForceMode.VelocityChange);
+        }
+        catch
+        {
+            // Eğer yine bir sebeple kinematikse AddForce hata fırlatır; güvenlik için swallow et.
         }
     }
+
 }

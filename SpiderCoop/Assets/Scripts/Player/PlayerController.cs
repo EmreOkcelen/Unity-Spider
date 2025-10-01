@@ -1,7 +1,9 @@
+using Unity.Netcode;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
-public class PlayerController : MonoBehaviour
+[RequireComponent(typeof(NetworkObject))]
+public class PlayerController : NetworkBehaviour
 {
     [Header("Movement")]
     public float moveSpeed = 6f;
@@ -22,6 +24,26 @@ public class PlayerController : MonoBehaviour
     public Camera playerCamera;
     public SimpleWebShooter webShooter;
     public JumpChargeUI jumpChargeUI; // ba�layaca��z (UI scripti a�a��da)
+
+    [Header("Networked Web")]
+    // Owner yazacak, everyone okuyacak
+    public NetworkVariable<bool> netIsAttached = new NetworkVariable<bool>(
+        false,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Owner);
+
+    [HideInInspector]
+    public NetworkVariable<Vector3> netAttachPoint = new NetworkVariable<Vector3>(
+        Vector3.zero,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Owner);
+
+    [HideInInspector]
+    public NetworkVariable<Vector3> netVelocity = new NetworkVariable<Vector3>(
+        Vector3.zero,
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Owner);
+
 
     [HideInInspector] public Rigidbody rb;
 
@@ -50,39 +72,109 @@ public class PlayerController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         rb.constraints = RigidbodyConstraints.FreezeRotation;
 
+        // Eğer inspector'da atanmadıysa, aynı GameObject veya child'larında Component var mı diye kontrol et (include inactive)
+        if (webShooter == null)
+        {
+            webShooter = GetComponentInChildren<SimpleWebShooter>(true);
+        }
+
         stateMachine = new StateMachine();
         groundedState = new GroundedState(this, stateMachine);
         airState = new AirState(this, stateMachine);
+
+        // !!! webShooter artık doğru şekilde setlendikten sonra WebState oluştur !!!
         webState = new WebState(this, stateMachine, webShooter);
 
         if (playerCamera == null) playerCamera = Camera.main;
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        base.OnNetworkSpawn();
+
+        // Eğer bu oyuncu local owner ise fizik simülasyonu devam etmeli.
+        // Değilse rb kinematik yap (diğer clientlarda fizik hesaplamayın).
+        if (!IsOwner)
+        {
+            rb.isKinematic = true;
+        }
+        else
+        {
+            rb.isKinematic = false;
+        }
+
+        // net variable değişimlerini dinle (ör: diğer clientlarda line renderer güncellemesi)
+        netIsAttached.OnValueChanged += (oldVal, newVal) =>
+        {
+            // burada SimpleWebShooter veya WebState diğer clientlar için görsel güncelleme yapabilir
+        };
+        netAttachPoint.OnValueChanged += (oldVal, newVal) =>
+        {
+            // attach point değiştiğinde görsel güncelle
+        };
+
+        if (IsOwner)
+        {
+            // UI'ı sahneden instantiate et ve referansı kendine ata
+            if (LocalUIManager.Instance != null)
+            {
+                var ui = LocalUIManager.Instance.CreateJumpChargeUIForPlayer(playerCamera);
+                jumpChargeUI = ui; // PlayerController.jumpChargeUI artık sahneden oluşturulan UI'ya referans tutar
+                if (jumpChargeUI != null) jumpChargeUI.SetVisible(false);
+            }
+        }
+        else
+        {
+            // non-owner: jumpChargeUI prefab child olsa bile kapat. (ya da null bırak)
+            if (jumpChargeUI != null) jumpChargeUI.gameObject.SetActive(false);
+        }
     }
 
     private void Start()
     {
         stateMachine.Initialize(groundedState);
         if (jumpChargeUI != null) jumpChargeUI.SetVisible(false);
+
+        // Kamera kontrolü: sadece owner'da aktif et
+        if (!IsOwner && playerCamera != null)
+        {
+            playerCamera.gameObject.SetActive(false);
+        }
     }
 
     private void Update()
     {
-        ReadInput();
-        HandleJumpChargeUIAndLogic();
+        // input ve UI sadece owner'da okunacak / güncellenecek
+        if (IsOwner)
+        {
+            ReadInput();
+            HandleJumpChargeUIAndLogic();
+        }
+
         stateMachine.LogicUpdate();
     }
 
     private void FixedUpdate()
     {
         GroundCheck();
-        stateMachine.PhysicsUpdate();
+
+        if (IsOwner)
+        {
+            stateMachine.PhysicsUpdate();
+        }
+        else
+        {
+            // non-owner: transform'ı NetworkTransform ile güncellenecek, fizik yok
+        }
     }
 
     private void ReadInput()
     {
+        // tamamen aynı input okuma kodu, sadece IsOwner olduğunda çağrılıyor
         inputMove = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
         inputFire = Input.GetMouseButtonDown(0);
 
-        // jump inputs
+        // jump inputs (aynı)
         if (Input.GetKeyDown(KeyCode.Space))
         {
             inputJumpPressed = true;
@@ -108,8 +200,6 @@ public class PlayerController : MonoBehaviour
         }
         else
         {
-            // reset release flag next frame; we will act on it in Update cycle
-            // keep it true for this frame only when released
             if (!inputJumpReleased) inputJumpReleased = false;
         }
     }
@@ -183,6 +273,11 @@ public class PlayerController : MonoBehaviour
     // movement helper unchanged
     public void Move(Vector3 localMove, bool useAirControl)
     {
+        // Eğer Rigidbody kinematik ise (ör. şu anda climbing modunda) fiziksel velocity ayarlanamaz.
+        // Bu durumda Move()'u atla — tırmanma kendi MovePosition ile kontrol ediliyor.
+        if (rb == null || rb.isKinematic)
+            return;
+
         Vector3 desired = transform.TransformDirection(localMove) * moveSpeed;
         Vector3 vel = rb.linearVelocity;
         Vector3 horizVel = new Vector3(vel.x, 0, vel.z);
@@ -199,4 +294,18 @@ public class PlayerController : MonoBehaviour
         rb.linearVelocity = v;
         rb.AddForce(Vector3.up * strength, ForceMode.VelocityChange);
     }
+
+    public void SetNetAttachPoint(Vector3 point)
+    {
+        if (!IsOwner) return;
+        netAttachPoint.Value = point;
+        netIsAttached.Value = true;
+    }
+
+    public void ClearNetAttach()
+    {
+        if (!IsOwner) return;
+        netIsAttached.Value = false;
+    }
+
 }
