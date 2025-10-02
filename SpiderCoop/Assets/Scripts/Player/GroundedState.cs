@@ -11,6 +11,7 @@ public class GroundedState : State
 
     public override void LogicUpdate()
     {
+        if (!player.IsOwner) return;
         // Eðer ateþ edildiyse web state'e geç
         if (player.inputFire)
         {

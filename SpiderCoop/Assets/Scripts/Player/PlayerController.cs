@@ -26,17 +26,16 @@ public class PlayerController : NetworkBehaviour
     public JumpChargeUI jumpChargeUI; // ba�layaca��z (UI scripti a�a��da)
 
     [Header("Networked Web")]
-    // Owner yazacak, everyone okuyacak
+    // using Unity.Netcode;
     public NetworkVariable<bool> netIsAttached = new NetworkVariable<bool>(
-        false,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Owner);
+    false,
+    NetworkVariableReadPermission.Everyone,
+    NetworkVariableWritePermission.Server);
 
-    [HideInInspector]
     public NetworkVariable<Vector3> netAttachPoint = new NetworkVariable<Vector3>(
         Vector3.zero,
         NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Owner);
+        NetworkVariableWritePermission.Server);
 
     [HideInInspector]
     public NetworkVariable<Vector3> netVelocity = new NetworkVariable<Vector3>(
@@ -92,8 +91,16 @@ public class PlayerController : NetworkBehaviour
     {
         base.OnNetworkSpawn();
 
+
+        Debug.Log($"[PlayerController] OnNetworkSpawn - GO:{gameObject.name} OwnerClientId:{NetworkObject.OwnerClientId} LocalClientId:{NetworkManager.Singleton.LocalClientId} IsOwner:{IsOwner} IsServer:{NetworkManager.Singleton.IsServer}");
         // Eğer bu oyuncu local owner ise fizik simülasyonu devam etmeli.
         // Değilse rb kinematik yap (diğer clientlarda fizik hesaplamayın).
+
+        if (rb != null)
+        {
+            Debug.Log($"[PlayerController] rb.isKinematic initially = {rb.isKinematic}");
+        }
+
         if (!IsOwner)
         {
             rb.isKinematic = true;
@@ -130,6 +137,22 @@ public class PlayerController : NetworkBehaviour
         }
     }
 
+    // Owner -> Server isteği
+    [ServerRpc(RequireOwnership = true)]
+    public void RequestAttachServerRpc(Vector3 attachPoint)
+    {
+        netAttachPoint.Value = attachPoint;
+        netIsAttached.Value = true;
+        Debug.Log($"[PlayerController] Server set attach for Owner:{NetworkObject.OwnerClientId} at {attachPoint}");
+    }
+
+    [ServerRpc(RequireOwnership = true)]
+    public void RequestDetachServerRpc()
+    {
+        netIsAttached.Value = false;
+        Debug.Log($"[PlayerController] Server cleared attach for Owner:{NetworkObject.OwnerClientId}");
+    }
+
     private void Start()
     {
         stateMachine.Initialize(groundedState);
@@ -142,16 +165,24 @@ public class PlayerController : NetworkBehaviour
         }
     }
 
+
+    private float dbgTimer = 0f;
     private void Update()
     {
+        dbgTimer += Time.deltaTime;
+        if (dbgTimer > 2f) // her 2 saniyede bir log
+        {
+            dbgTimer = 0f;
+            Debug.Log($"[PlayerController] Update Debug - GO:{gameObject.name} OwnerClientId:{NetworkObject.OwnerClientId} LocalClientId:{NetworkManager.Singleton.LocalClientId} IsOwner:{IsOwner} rb.isKinematic={(rb != null ? rb.isKinematic.ToString() : "null")}");
+        }
+
         // input ve UI sadece owner'da okunacak / güncellenecek
         if (IsOwner)
         {
             ReadInput();
             HandleJumpChargeUIAndLogic();
+            stateMachine.LogicUpdate();
         }
-
-        stateMachine.LogicUpdate();
     }
 
     private void FixedUpdate()
@@ -161,10 +192,6 @@ public class PlayerController : NetworkBehaviour
         if (IsOwner)
         {
             stateMachine.PhysicsUpdate();
-        }
-        else
-        {
-            // non-owner: transform'ı NetworkTransform ile güncellenecek, fizik yok
         }
     }
 

@@ -31,23 +31,33 @@ public class SimpleWebShooter : NetworkBehaviour
     // Called from WebState.Enter() (owner tarafýndan çaðrýlmalý)
     public Vector3? TryShoot()
     {
-        if (!IsOwner) return null; // sadece owner input okur
+        if (!IsOwner) return null;
 
-        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        Camera cam = Camera.main;
+        if (cam == null) { Debug.LogWarning("SimpleWebShooter.TryShoot: Camera.main is null"); return null; }
+
+        Ray ray = cam.ScreenPointToRay(Input.mousePosition);
         if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, grappleLayer))
         {
             attachPoint = hit.point;
-            // network deðiþkenlerini güncelle
+
+            var pc = GetComponent<PlayerController>();
             if (pc != null && pc.IsOwner)
             {
-                pc.netAttachPoint.Value = attachPoint;
-                pc.netIsAttached.Value = true;
+                // Server'a bildir
+                pc.RequestAttachServerRpc(attachPoint);
+                Debug.Log($"[SimpleWebShooter] Owner requested server attach at {attachPoint}");
             }
+            else
+            {
+                Debug.LogWarning("[SimpleWebShooter] TryShoot: PlayerController missing or not owner.");
+            }
+
             return attachPoint;
         }
-
         return null;
     }
+
 
     public void StartPulling(Rigidbody playerRb)
     {

@@ -15,6 +15,21 @@ public class WebState : State
 
     public override void Enter()
     {
+        // Kesin: yalnızca owner TryShoot yapabilir
+        if (!player.IsOwner)
+        {
+            Debug.Log($"WebState.Enter cancelled: not owner for {player.name}");
+            stateMachine.ChangeState(player.isGrounded ? player.groundedState : player.airState);
+            return;
+        }
+
+        if (webShooter == null)
+        {
+            Debug.LogError($"WebState.Enter: webShooter is null for {player.name}");
+            stateMachine.ChangeState(player.isGrounded ? player.groundedState : player.airState);
+            return;
+        }
+
         Vector3? hitPoint = webShooter.TryShoot();
         if (hitPoint.HasValue)
         {
